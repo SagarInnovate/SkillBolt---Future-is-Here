@@ -3,6 +3,8 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use App\Http\Middleware\AdminMiddleware;
+use Illuminate\Console\Scheduling\Schedule; // Change this line
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -11,8 +13,25 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        //
+        // Register global middleware
+        $middleware->web(append: [
+            // Any additional web middleware you want to add
+        ]);
+        
+        $middleware->api(append: [
+            // Any additional API middleware you want to add
+        ]);
+        
+        // Register route middleware aliases
+        $middleware->alias([
+            'admin' => AdminMiddleware::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
-    })->create();
+        // Exception handling configuration
+    })
+    ->withSchedule(function (Schedule $schedule) {
+        // Load schedule configuration from bootstrap/schedule.php
+        require __DIR__.'/schedule.php';
+    })
+    ->create();

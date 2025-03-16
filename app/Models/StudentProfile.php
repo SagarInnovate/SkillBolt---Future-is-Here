@@ -13,6 +13,7 @@ class StudentProfile extends Model
     public $incrementing = false;
     
     protected $fillable = [
+        'user_id',
         'college',
         'graduation_year',
         'branch',

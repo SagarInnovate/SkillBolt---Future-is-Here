@@ -5,12 +5,11 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
+    use  HasFactory, Notifiable, SoftDeletes;
 
     protected $fillable = [
         'name',
@@ -34,7 +33,7 @@ class User extends Authenticatable
     public function roles()
     {
         return $this->belongsToMany(Role::class, 'role_user')
-                    ->withTimestamp('assigned_at');
+                    ->withTimestamps('assigned_at');
     }
 
     public function permissions()
@@ -42,7 +41,7 @@ class User extends Authenticatable
         return $this->belongsToMany(Permission::class, 'permission_user')
                     ->withPivot('status')
                     ->wherePivot('status', 'active')
-                    ->withTimestamp('granted_at');
+                    ->withTimestamps('granted_at');
     }
 
     public function studentProfile()

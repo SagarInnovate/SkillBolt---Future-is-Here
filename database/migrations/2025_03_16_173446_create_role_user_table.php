@@ -13,6 +13,8 @@ return new class extends Migration
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
             $table->foreignId('role_id')->constrained();
             $table->timestamp('assigned_at')->useCurrent();
+            $table->timestamp('updated_at')->nullable(); // Add this line
+    
             
             $table->unique(['user_id', 'role_id']);
             $table->index('user_id');
