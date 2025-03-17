@@ -23,8 +23,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Schema;
-
-
+use App\Rules\StrongPassword;
 
 
 
@@ -43,10 +42,15 @@ class AuthController extends Controller
      */
     public function register(Request $request): \Illuminate\Http\RedirectResponse
     {
+        $userData = [
+            $request->name ?? '',
+            $request->email ?? '',
+        ];
+        
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:' . User::class],
-            'password' => ['required', 'confirmed', Rules\Password::defaults()],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:'.User::class],
+            'password' => ['required', 'confirmed', new StrongPassword($userData)],
             'user_role' => ['required', 'in:student,company'],
             'terms' => ['required', 'accepted'],
         ]);
@@ -145,9 +149,14 @@ class AuthController extends Controller
     /**
      * Show login form
      */
-    public function showLoginForm()
+    public function showLoginForm(Request $request)
     {
-        return view('auth.login');
+        // Get email from query parameter (if present from verification)
+        $email = $request->query('email');
+        
+        return view('auth.login', [
+            'prefillEmail' => $email
+        ]);
     }
 
     /**
@@ -394,10 +403,18 @@ class AuthController extends Controller
      */
     public function resetPassword(Request $request)
     {
+        $user = User::where('email', $request->email)->first();
+        
+        // Get user data to check against password
+        $userData = [
+            $user->name ?? '',
+            $user->email ?? '',
+        ];
+        
         $request->validate([
             'token' => ['required'],
             'email' => ['required', 'email', 'exists:users,email'],
-            'password' => ['required', 'confirmed', Rules\Password::defaults()],
+            'password' => ['required', 'confirmed', new StrongPassword($userData)],
         ]);
 
         $passwordReset = PasswordReset::where('email', $request->email)

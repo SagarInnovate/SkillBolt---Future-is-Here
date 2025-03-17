@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\EmailVerificationController;
 use App\Http\Controllers\WaitlistController;
+use App\Http\Controllers\Auth\SocialAuthController;
+use Illuminate\Support\Facades\Mail;
 
 // Landing page with waitlist
 Route::view('/', 'landing')->name('home');
@@ -22,7 +24,10 @@ Route::middleware('guest')->group(function () {
     // Registration routes
     Route::get('/register', [AuthController::class, 'showRegisterForm'])->name('register');
     Route::post('/register', [AuthController::class, 'register']);
-    
+
+    Route::get('/auth/{provider}', [SocialAuthController::class, 'redirectToProvider'])->where('provider', 'google|github|linkedin|microsoft')->name('social.login');
+    Route::get('/auth/{provider}/callback', [SocialAuthController::class, 'handleProviderCallback'])->where('provider', 'google|github|linkedin|microsoft')->name('social.callback');   
+   
     // Password reset routes
     Route::get('/forgot-password', [AuthController::class, 'showForgotPasswordForm'])->name('password.request');
     Route::post('/forgot-password', [AuthController::class, 'sendPasswordResetOtp'])->name('password.email');
@@ -39,17 +44,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     
     // Email verification
-    Route::get('/email/verify', [EmailVerificationController::class, 'notice'])
-    ->name('verification.notice');
-
-Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
-    ->middleware(['signed']) // Use Laravel's built-in signed URL middleware
-    ->name('verification.verify');
-
-Route::post('/email/verification-notification', [EmailVerificationController::class, 'resend'])
-    ->middleware(['throttle:6,1']) // Allow max 6 resend attempts per minute
-    ->name('verification.resend');
-    
+    Route::get('/email/verify', [EmailVerificationController::class, 'notice'])->name('verification.notice');
+    Route::post('/email/verification-notification', [EmailVerificationController::class, 'resend'])->middleware(['throttle:6,1'])->name('verification.resend');
+        
     // Protected routes that also require email verification
     Route::middleware('verified')->group(function () {
         // Dashboard (placeholder for now)
@@ -59,6 +56,8 @@ Route::post('/email/verification-notification', [EmailVerificationController::cl
         Route::get('/referral-link', [WaitlistController::class, 'getReferralLink'])->name('referral.link');
     });
 });
+Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware(['signed'])->name('verification.verify');
+  
 
 // Static pages
 Route::view('/terms', 'pages.terms')->name('terms');

@@ -8,9 +8,11 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use App\Mail\VerifyEmail;
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Auth;
 
 class EmailVerificationController extends Controller
 {
@@ -19,8 +21,16 @@ class EmailVerificationController extends Controller
      */
     public function notice()
     {
-        // Check whether we need to disable the resend button
         $user = auth()->user();
+        
+        // Critical: Check if user is already verified first
+        if ($user && $user->hasVerifiedEmail()) {
+            Log::info('Verified user attempted to access verification notice', ['user_id' => $user->id]);
+            return redirect()->route('dashboard')
+                ->with('status', 'Your email has already been verified. No further action is needed.');
+        }
+        
+        // Continue with cooldown logic only for unverified users
         $cooldownEnds = $this->getEmailCooldownTime($user);
         $remainingTime = $cooldownEnds ? now()->diffInSeconds($cooldownEnds, false) : 0;
         
@@ -38,13 +48,16 @@ class EmailVerificationController extends Controller
     {
         $user = $request->user();
         
-        // Check if user is already verified
-        if ($user->email_verified_at) {
-            return redirect()->route('dashboard')->with('status', 'Your email has already been verified.');
+        // Critical: Check if user is already verified first
+        if ($user && $user->hasVerifiedEmail()) {
+            Log::info('Verified user attempted to resend verification email', ['user_id' => $user->id]);
+            return redirect()->route('dashboard')
+                ->with('status', 'Your email has already been verified. No further action is needed.');
         }
         
         // Check if user is suspended
         if ($user->account_status === 'suspended') {
+            Log::warning('Suspended user attempted to resend verification email', ['user_id' => $user->id]);
             return back()->with('error', 'Your account has been suspended due to suspicious activity. Please contact support.');
         }
         
@@ -52,6 +65,10 @@ class EmailVerificationController extends Controller
         $cooldownEnds = $this->getEmailCooldownTime($user);
         if ($cooldownEnds && now()->lt($cooldownEnds)) {
             $remainingSeconds = now()->diffInSeconds($cooldownEnds);
+            Log::info('User attempted to resend verification during cooldown', [
+                'user_id' => $user->id, 
+                'remaining_seconds' => $remainingSeconds
+            ]);
             return back()->with('error', "Please wait {$remainingSeconds} seconds before requesting another verification email.");
         }
         
@@ -61,22 +78,32 @@ class EmailVerificationController extends Controller
             // Suspend account after too many attempts
             $user->update(['account_status' => 'suspended']);
             
+            Log::warning('User account suspended due to too many verification attempts', ['user_id' => $user->id]);
             return back()->with('error', 'Your account has been temporarily suspended due to too many verification attempts. Please contact support.');
         }
         
         // Generate verification URL (valid for 10 minutes)
         $verificationUrl = $this->generateVerificationUrl($user);
         
-        // Send the email
-        Mail::to($user->email)->send(new VerifyEmail($user, $verificationUrl));
-        
-        // Set new cooldown period based on attempts
-        $this->setEmailCooldown($user);
-        
-        // Decrement attempts left
-        $this->decrementAttemptsLeft($user);
-        
-        return back()->with('resent', true);
+        try {
+            // Send the email
+            Mail::to($user->email)->send(new VerifyEmail($user, $verificationUrl));
+            
+            // Set new cooldown period based on attempts
+            $this->setEmailCooldown($user);
+            
+            // Decrement attempts left
+            $this->decrementAttemptsLeft($user);
+            
+            Log::info('Verification email sent successfully', ['user_id' => $user->id]);
+            return back()->with('resent', true);
+        } catch (\Exception $e) {
+            Log::error('Failed to send verification email', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage()
+            ]);
+            return back()->with('error', 'Failed to send verification email. Please try again later.');
+        }
     }
 
     /**
@@ -84,29 +111,51 @@ class EmailVerificationController extends Controller
      */
     public function verify(Request $request, $id)
     {
+        $user = User::findOrFail($id);
+        
+        // Check if already verified first - works regardless of device
+        if ($user->hasVerifiedEmail()) {
+            Log::info('Already verified user accessed verification link', ['user_id' => $user->id]);
+            
+            // Check if user is logged in
+            if (Auth::check()) {
+                return redirect()->route('dashboard')
+                    ->with('status', 'Your email has already been verified. No further action is needed.');
+            } else {
+                // If verifying from different device, show success page with login button
+                return view('auth.verification-success', [
+                    'alreadyVerified' => true,
+                    'email' => $user->email
+                ]);
+            }
+        }
+        
         // Validate the URL signature
         if (!$request->hasValidSignature()) {
+            Log::warning('Invalid or expired verification link accessed', ['user_id' => $user->id]);
             return redirect()->route('verification.notice')
                 ->with('error', 'The verification link is invalid or has expired.');
         }
         
-        $user = User::findOrFail($id);
-        
-        // Check if already verified
-        if ($user->email_verified_at) {
-            return redirect()->route('dashboard')
-                ->with('status', 'Your email has already been verified.');
-        }
-        
         // Verify the user
-        $user->email_verified_at = now();
-        $user->save();
+        $user->markEmailAsVerified();
         
         // Reset attempts and cooldown
         $this->resetVerificationLimits($user);
         
-        return redirect()->route('dashboard')
-            ->with('status', 'Your email has been verified successfully!');
+        Log::info('User email verified successfully', ['user_id' => $user->id]);
+        
+        // Check if user is logged in (same device verification)
+        if (Auth::check() && Auth::id() == $user->id) {
+            return redirect()->route('dashboard')
+                ->with('status', 'Your email has been verified successfully!');
+        } else {
+            // If verifying from different device, show success page with login button
+            return view('auth.verification-success', [
+                'alreadyVerified' => false,
+                'email' => $user->email
+            ]);
+        }
     }
 
     /**

@@ -44,6 +44,14 @@ class User extends Authenticatable
                     ->withTimestamps('granted_at');
     }
 
+    /**
+     * Get the social accounts associated with the user.
+     */
+    public function socialAccounts(): HasMany
+    {
+        return $this->hasMany(SocialAccount::class);
+    }
+
     public function studentProfile()
     {
         return $this->hasOne(StudentProfile::class);

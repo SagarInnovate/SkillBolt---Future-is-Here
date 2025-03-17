@@ -58,4 +58,7 @@
         </form>
     </div>
 </div>
+
+<script src="{{ asset('js/password-strength.js') }}"></script>
+
 @endsection
