@@ -24,7 +24,7 @@ class SocialAccount extends Model
     /**
      * Get the user that owns the social account.
      */
-    public function user(): BelongsTo
+    public function user()
     {
         return $this->belongsTo(User::class);
     }
