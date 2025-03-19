@@ -443,8 +443,7 @@
                                                 </div>
                                                 <div>
                                                     <h4 class="text-sm font-medium text-gray-900">{{ $achievement->name }}</h4>
-                                                    <p class="text-xs text-gray-500">{{ $achievement->pivot->earned_at->format('M j, Y') }}</p>
-                                                </div>
+                                                    {{ \Carbon\Carbon::parse($achievement->pivot->earned_at)->format('M j, Y') }}                                                </div>
                                             </div>
                                             <p class="mt-2 text-sm text-gray-600">{{ $achievement->description }}</p>
                                             <div class="mt-2">

@@ -19,8 +19,6 @@ class Transaction extends Model
         'transaction_code',
         'user_id',
         'transaction_type',
-        'reference_id',
-        'reference_type',
         'amount',
         'currency',
         'type',
@@ -37,6 +35,8 @@ class Transaction extends Model
         'amount' => 'decimal:2',
         'balance_after' => 'decimal:2',
         'metadata' => 'json',
+        'is_locked' => 'boolean',
+        'last_verified_at' => 'datetime',
     ];
     
     /**
@@ -48,6 +48,53 @@ class Transaction extends Model
             // Generate a unique transaction code if not provided
             if (empty($transaction->transaction_code)) {
                 $transaction->transaction_code = static::generateUniqueCode();
+            }
+            
+            // Generate signature for transaction integrity
+            if (empty($transaction->signature)) {
+                $transaction->signature = self::generateSignature($transaction);
+            }
+            
+            // Set default for is_locked if not provided
+            if (!isset($transaction->is_locked)) {
+                $transaction->is_locked = true;
+            }
+        });
+        
+        // Prevent updates to financial fields if the transaction is locked
+        static::updating(function ($transaction) {
+            if ($transaction->is_locked) {
+                $protectedFields = [
+                    'transaction_code', 'user_id', 'amount', 'type', 
+                    'status', 'balance_after', 'signature'
+                ];
+                
+                $dirtyFields = array_keys($transaction->getDirty());
+                
+                foreach ($dirtyFields as $field) {
+                    if (in_array($field, $protectedFields)) {
+                        if ($field === 'status' && auth()->user() && auth()->user()->isAdmin()) {
+                            // Allow status changes by admins (with audit log)
+                            if (class_exists('App\Models\AuditLog')) {
+                                AuditLog::create([
+                                    'user_id' => auth()->id(),
+                                    'action' => 'transaction_status_changed',
+                                    'details' => json_encode([
+                                        'transaction_id' => $transaction->id,
+                                        'old_status' => $transaction->getOriginal('status'),
+                                        'new_status' => $transaction->status
+                                    ]),
+                                    'ip_address' => request()->ip(),
+                                    'user_agent' => request()->userAgent()
+                                ]);
+                            }
+                            continue;
+                        }
+                        
+                        // Prevent update of protected fields
+                        return false;
+                    }
+                }
             }
         });
     }
@@ -62,6 +109,39 @@ class Transaction extends Model
         } while (static::where('transaction_code', $code)->exists());
         
         return $code;
+    }
+    
+    /**
+     * Generate signature for transaction verification.
+     */
+    public static function generateSignature($transaction): string
+    {
+        $data = json_encode([
+            'transaction_code' => $transaction->transaction_code,
+            'user_id' => $transaction->user_id,
+            'amount' => (string) $transaction->amount,
+            'type' => $transaction->type,
+            'transaction_type' => $transaction->transaction_type,
+            'created_at' => $transaction->created_at ? $transaction->created_at->toISOString() : now()->toISOString()
+        ]);
+        
+        return hash_hmac('sha256', $data, config('app.key'));
+    }
+    
+    /**
+     * Verify transaction integrity.
+     */
+    public function verifyIntegrity(): bool
+    {
+        $expectedSignature = self::generateSignature($this);
+        $result = hash_equals($this->signature, $expectedSignature);
+        
+        if ($result) {
+            $this->last_verified_at = now();
+            $this->saveQuietly(); // Save without triggering events
+        }
+        
+        return $result;
     }
     
     /**
@@ -169,7 +249,59 @@ class Transaction extends Model
     }
     
     /**
-     * Create a transaction record.
+     * Calculate a user's current balance from transaction history.
+     */
+/**
+ * Calculate a user's current balance from transaction history.
+ */
+
+ public static function calculateUserBalance($userId): float
+ {
+     // Define transaction types that increase balance
+     $creditTypes = [
+         'commission',           // Affiliate commissions
+         'sales_earnings',       // Seller earnings
+         'refund_received',      // Refunds received
+         'bonus',                // Bonuses awarded
+         'deposit',              // Manual deposits
+         'subscription_refund'   // Refunded subscription
+     ];
+     
+     // Define transaction types that decrease balance
+     $debitTypes = [
+         'payout',               // Affiliate/seller payouts
+         'purchase',             // Project purchases
+         'subscription',         // Subscription payments
+         'mentor_fee',           // Mentor service fees
+         'freelance_payment',    // Freelance payments
+         'custom_project_payment' // Custom project payments
+     ];
+ 
+     // Get all transactions for the user
+     $transactions = self::where('user_id', $userId)
+         ->where('status', 'completed')
+         ->get();
+ 
+     // Filter transactions with valid integrity
+     $validTransactions = $transactions->filter(function($transaction) {
+         return $transaction->verifyIntegrity();
+     });
+     
+     // Calculate credits - use collection methods, not query builder
+     $credits = $validTransactions->filter(function($transaction) use ($creditTypes) {
+         return $transaction->type === 'credit' && in_array($transaction->transaction_type, $creditTypes);
+     })->sum('amount');
+     
+     // Calculate debits - use collection methods, not query builder
+     $debits = $validTransactions->filter(function($transaction) use ($debitTypes) {
+         return $transaction->type === 'debit' && in_array($transaction->transaction_type, $debitTypes);
+     })->sum('amount');
+     
+     return floatval($credits - $debits);
+ }
+    
+    /**
+     * Create a transaction record with signature and auditing.
      *
      * @param int $userId User ID
      * @param string $transactionType Type of transaction (purchase, commission, etc.)
@@ -193,12 +325,8 @@ class Transaction extends Model
         $currency = 'INR',
         $status = 'completed'
     ): self {
-        // Get the current balance
-        $latestTransaction = self::where('user_id', $userId)
-            ->orderBy('id', 'desc')
-            ->first();
-            
-        $currentBalance = $latestTransaction ? $latestTransaction->balance_after : 0;
+        // Calculate balance from transaction history for accuracy
+        $currentBalance = self::calculateUserBalance($userId);
         
         // Calculate new balance
         $balanceAfter = $type === 'credit' 
@@ -216,11 +344,11 @@ class Transaction extends Model
         $transaction->status = $status;
         $transaction->balance_after = $balanceAfter;
         $transaction->description = $description;
+        $transaction->is_locked = true;
         
         // If reference is provided
         if ($reference) {
-            $transaction->reference_id = $reference->id;
-            $transaction->reference_type = get_class($reference);
+            $transaction->reference()->associate($reference);
         }
         
         // If metadata is provided
@@ -228,7 +356,26 @@ class Transaction extends Model
             $transaction->metadata = $metadata;
         }
         
+        // Generate signature before saving
+        $transaction->signature = self::generateSignature($transaction);
         $transaction->save();
+        
+        // Log the transaction creation if AuditLog exists
+        if (class_exists('App\Models\AuditLog')) {
+            AuditLog::create([
+                'user_id' => auth()->id() ?? null,
+                'action' => 'transaction_created',
+                'details' => json_encode([
+                    'transaction_id' => $transaction->id,
+                    'user_id' => $userId,
+                    'amount' => (string) $amount,
+                    'type' => $type,
+                    'balance_after' => (string) $balanceAfter
+                ]),
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent()
+            ]);
+        }
         
         return $transaction;
     }
@@ -238,13 +385,37 @@ class Transaction extends Model
      */
     public function markAsFailed($reason = null): self
     {
+        // Only allow if transaction is pending
+        if ($this->status !== 'pending') {
+            return $this;
+        }
+        
         $this->status = 'failed';
         
         if ($reason) {
             $this->metadata = array_merge($this->metadata ?? [], ['failure_reason' => $reason]);
         }
         
+        // Temporarily unlock to allow status change
+        $wasLocked = $this->is_locked;
+        $this->is_locked = false;
         $this->save();
+        $this->is_locked = $wasLocked;
+        $this->save();
+        
+        // Log the action if AuditLog exists
+        if (class_exists('App\Models\AuditLog')) {
+            AuditLog::create([
+                'user_id' => auth()->id() ?? null,
+                'action' => 'transaction_marked_failed',
+                'details' => json_encode([
+                    'transaction_id' => $this->id,
+                    'reason' => $reason
+                ]),
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent()
+            ]);
+        }
         
         return $this;
     }
@@ -256,6 +427,11 @@ class Transaction extends Model
      */
     public function reverse($reason = null): self
     {
+        // Only completed transactions can be reversed
+        if ($this->status !== 'completed') {
+            return $this;
+        }
+        
         // Create a reversal transaction
         $reversalType = $this->type === 'credit' ? 'debit' : 'credit';
         
@@ -274,13 +450,36 @@ class Transaction extends Model
         );
         
         // Mark this transaction as reversed
-        $this->status = 'reversed';
-        $this->metadata = array_merge($this->metadata ?? [], [
+        $originalMetadata = $this->metadata ?? [];
+        $newMetadata = array_merge($originalMetadata, [
             'reversal_transaction_id' => $reversal->id,
             'reversal_transaction_code' => $reversal->transaction_code,
             'reversal_reason' => $reason
         ]);
+        
+        // Temporarily unlock to allow status change
+        $wasLocked = $this->is_locked;
+        $this->is_locked = false;
+        $this->status = 'reversed';
+        $this->metadata = $newMetadata;
         $this->save();
+        $this->is_locked = $wasLocked;
+        $this->save();
+        
+        // Log the reversal if AuditLog exists
+        if (class_exists('App\Models\AuditLog')) {
+            AuditLog::create([
+                'user_id' => auth()->id() ?? null,
+                'action' => 'transaction_reversed',
+                'details' => json_encode([
+                    'transaction_id' => $this->id,
+                    'reversal_id' => $reversal->id,
+                    'reason' => $reason
+                ]),
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent()
+            ]);
+        }
         
         return $reversal;
     }

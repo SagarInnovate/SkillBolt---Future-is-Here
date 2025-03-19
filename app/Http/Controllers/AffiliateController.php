@@ -16,6 +16,9 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use App\Models\ReferralClick;
 use App\Models\Waitlist;
+use App\Models\AuditLog;
+
+
 
 
 class AffiliateController extends Controller
@@ -308,7 +311,7 @@ class AffiliateController extends Controller
             'payment_details' => 'required|string',
         ]);
         
-        $availableBalance = $user->affiliateDetails ? $user->affiliateDetails->available_balance : 0;
+        $availableBalance = Transaction::calculateUserBalance($user->id);
         $minPayoutThreshold = AffiliateSetting::get('min_payout_threshold', 1000);
         
         // Check if user can request payout
@@ -324,38 +327,51 @@ class AffiliateController extends Controller
         if ($pendingPayout) {
             return back()->with('error', 'You already have a pending payout request.');
         }
-        
-        // Create payout request
-        $payout = Payout::create([
-            'user_id' => $user->id,
-            'amount' => $availableBalance,
-            'payment_method' => $request->payment_method,
-            'status' => 'processing',
-            'payment_details' => $request->payment_details,
-        ]);
-        
-        // Get pending and approved commissions to associate with this payout
-        Commission::where('user_id', $user->id)
-            ->whereIn('status', ['pending', 'approved'])
-            ->update(['payout_id' => $payout->id]);
+        \DB::transaction(function() use ($user, $request, $availableBalance) {
+            // Create payout request
+            $payout = Payout::create([
+                'user_id' => $user->id,
+                'amount' => $availableBalance,
+                'payment_method' => $request->payment_method,
+                'status' => 'processing',
+                'payment_details' => $request->payment_details,
+            ]);
             
-        // Create transaction record
-        Transaction::createTransaction(
-            $user->id,
-            'payout_request',
-            $availableBalance,
-            'debit',
-            'Payout request #' . $payout->id,
-            $payout,
-            null,
-            'INR',
-            'pending'
-        );
+            // Get pending and approved commissions to associate with this payout
+            Commission::where('user_id', $user->id)
+                ->whereIn('status', ['pending', 'approved'])
+                ->update(['payout_id' => $payout->id]);
+                
+            // Create transaction record - this will be pending until payout is completed
+            Transaction::createTransaction(
+                $user->id,
+                'payout_request',
+                $availableBalance,
+                'debit',
+                'Payout request #' . $payout->id,
+                $payout,
+                ['payment_method' => $request->payment_method],
+                'INR',
+                'pending'
+            );
             
+            // Log the payout request
+            AuditLog::create([
+                'user_id' => $user->id,
+                'action' => 'payout_requested',
+                'details' => json_encode([
+                    'payout_id' => $payout->id,
+                    'amount' => (string) $availableBalance,
+                    'payment_method' => $request->payment_method
+                ]),
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent()
+            ]);
+        });
+        
         return redirect()->route('affiliate.payouts')
             ->with('success', 'Payout request submitted successfully!');
     }
-    
     /**
      * Generate and return QR code for referral link
      */
@@ -424,6 +440,16 @@ class AffiliateController extends Controller
         // Create affiliate account
         $affiliateDetail = $this->affiliateService->createAffiliateAccount(auth()->user());
         
+        AuditLog::create([
+            'user_id' => auth()->id(),
+            'action' => 'joined_affiliate_program',
+            'details' => json_encode([
+                'affiliate_code' => $affiliateDetail->affiliate_code
+            ]),
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->userAgent()
+        ]);
+
         // Redirect to the affiliate dashboard
         return redirect()->route('affiliate.dashboard')
             ->with('success', 'You have successfully joined the affiliate program!');

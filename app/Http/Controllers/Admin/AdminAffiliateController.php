@@ -12,6 +12,10 @@ use App\Models\Achievement;
 use App\Services\AffiliateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Models\Transaction;
+use App\Models\User;
+use App\Models\AuditLog;
+
 
 class AdminAffiliateController extends Controller
 {
@@ -528,12 +532,13 @@ class AdminAffiliateController extends Controller
      */
     public function settings()
     {
-        $settings = AffiliateSetting::all();
+        $settings = AffiliateSetting::pluck('value', 'key')->toArray();
         
         // Parse tier requirements for display
         $tierRequirementsJson = AffiliateSetting::where('key', 'tier_requirements')->value('value');
         $tierRequirements = json_decode($tierRequirementsJson, true);
         
+        // print_r($settings['key']);
         return view('admin.affiliate.settings', compact('settings', 'tierRequirements'));
     }
     
@@ -647,5 +652,100 @@ class AdminAffiliateController extends Controller
         $achievement->delete();
         
         return redirect()->back()->with('success', 'Achievement deleted successfully!');
+    }
+
+    public function reconcileBalances()
+    {
+        // Start with empty results array
+        $results = [
+            'total_checked' => 0,
+            'discrepancies' => [],
+            'successful' => 0
+        ];
+        
+        // Get all affiliate details
+        $affiliateDetails = AffiliateDetail::all();
+        $results['total_checked'] = $affiliateDetails->count();
+        
+        foreach ($affiliateDetails as $detail) {
+            $storedBalance = $detail->available_balance;
+            $calculatedBalance = Transaction::calculateUserBalance($detail->user_id);
+            
+            // Check for discrepancies
+            if (bccomp((string) $storedBalance, (string) $calculatedBalance, 2) !== 0) {
+                // Log the discrepancy
+                AuditLog::create([
+                    'user_id' => auth()->id(),
+                    'action' => 'balance_discrepancy_detected',
+                    'details' => json_encode([
+                        'user_id' => $detail->user_id,
+                        'stored_balance' => (string) $storedBalance,
+                        'calculated_balance' => (string) $calculatedBalance,
+                        'difference' => (string) ($calculatedBalance - $storedBalance)
+                    ])
+                ]);
+                
+                // Add to results array
+                $results['discrepancies'][] = [
+                    'user_id' => $detail->user_id,
+                    'affiliate_id' => $detail->id,
+                    'name' => $detail->user->name,
+                    'email' => $detail->user->email,
+                    'stored_balance' => $storedBalance,
+                    'calculated_balance' => $calculatedBalance,
+                    'difference' => $calculatedBalance - $storedBalance
+                ];
+            } else {
+                $results['successful']++;
+            }
+            
+            // Update reconciliation timestamp
+            $detail->last_reconciled_at = now();
+            $detail->save();
+        }
+        
+        return view('admin.affiliate.reconcile-results', compact('results'));
+    }
+
+    public function fixBalanceDiscrepancy($userId)
+    {
+        $user = User::findOrFail($userId);
+        $affiliateDetail = $user->affiliateDetails;
+        
+        if (!$affiliateDetail) {
+            return back()->with('error', 'Affiliate account not found.');
+        }
+        
+        $storedBalance = $affiliateDetail->available_balance;
+        $calculatedBalance = Transaction::calculateUserBalance($userId);
+        
+        // Calculate total earnings as well (if needed)
+        $totalCredits = Transaction::where('user_id', $userId)
+            ->where('type', 'credit')
+            ->where('status', 'completed')
+            ->sum('amount');
+        
+        // Log the action with IP and user agent
+        AuditLog::create([
+            'user_id' => auth()->id(),
+            'action' => 'balance_manual_correction',
+            'details' => json_encode([
+                'user_id' => $userId,
+                'old_balance' => (string) $storedBalance,
+                'new_balance' => (string) $calculatedBalance,
+                'old_total_earnings' => (string) $affiliateDetail->total_earnings,
+                'new_total_earnings' => (string) $totalCredits,
+                'admin_id' => auth()->id()
+            ]),
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->userAgent()
+        ]);
+        
+        // Update both the available balance and total earnings
+        $affiliateDetail->available_balance = $calculatedBalance;
+        $affiliateDetail->total_earnings = $totalCredits;
+        $affiliateDetail->save();
+        
+        return back()->with('success', "Balance corrected for user #{$userId}. Old balance: ₹{$storedBalance}, New balance: ₹{$calculatedBalance}");
     }
 }

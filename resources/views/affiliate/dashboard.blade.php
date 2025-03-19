@@ -390,8 +390,7 @@
                                         @endif
                                         <h3 class="text-sm font-medium text-gray-900">{{ $achievement->name }}</h3>
                                         <p class="text-xs text-gray-500">{{ $achievement->description }}</p>
-                                        <p class="text-xs text-indigo-600 mt-1">{{ $achievement->pivot->earned_at->format('M j, Y') }}</p>
-                                    </div>
+                                        {{ \Carbon\Carbon::parse($achievement->pivot->earned_at)->format('M j, Y') }}     </div>
                                 @endforeach
                             </div>
                         @else

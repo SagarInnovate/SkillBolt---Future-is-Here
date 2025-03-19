@@ -19,6 +19,7 @@ class AffiliateDetail extends Model
         'total_referrals',
         'successful_referrals',
         'qr_code_path',
+        'last_reconciled_at',
     ];
 
     protected $casts = [
@@ -27,6 +28,7 @@ class AffiliateDetail extends Model
         'tier_level' => 'integer',
         'total_referrals' => 'integer',
         'successful_referrals' => 'integer',
+        'last_reconciled_at' => 'datetime',
     ];
 
     public function user()
@@ -104,4 +106,11 @@ class AffiliateDetail extends Model
     {
         // Implementation will be in AffiliateService
     }
+
+
+    public function getCalculatedBalanceAttribute(): float
+    {
+        return Transaction::calculateUserBalance($this->user_id);
+    }
+
 }

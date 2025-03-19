@@ -145,4 +145,10 @@ Route::middleware(['auth', 'admin'])->prefix('admin/affiliate')->name('admin.aff
     Route::post('/achievements', [AdminAffiliateController::class, 'storeAchievement'])->name('store-achievement');
     Route::patch('/achievements/{id}', [AdminAffiliateController::class, 'updateAchievement'])->name('update-achievement');
     Route::delete('/achievements/{id}', [AdminAffiliateController::class, 'deleteAchievement'])->name('delete-achievement');
+    // Route::get('/affiliates/{id}', [AdminAffiliateController::class, 'showAffiliate'])->name('show-affiliate');
+
+    // Reconciliation
+    Route::get('/reconcile', [AdminAffiliateController::class, 'reconcileBalances'])->name('reconcile');
+    Route::post('/reconcile/fix/{id}', [AdminAffiliateController::class, 'fixBalanceDiscrepancy'])->name('fix-balance');
+
 });

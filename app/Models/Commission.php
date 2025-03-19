@@ -68,6 +68,15 @@ class Commission extends Model
         if ($affiliateDetail) {
             $affiliateDetail->increment('total_earnings', $this->amount);
             $affiliateDetail->increment('available_balance', $this->amount);
+
+            Transaction::createTransaction(
+                $user->id, 
+                'commission_earned', 
+                $amount, 
+                'credit', 
+                'Commission earned for referral #' . $referral->id,
+                $referral
+            );
         }
     }
 }

@@ -14,6 +14,7 @@
             </a>
         </div>
 
+        
         @if(session('success'))
         <div class="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded relative" role="alert">
             <span class="block sm:inline">{{ session('success') }}</span>
@@ -62,8 +63,8 @@
                             <label for="affiliate_program_active" class="block text-sm font-medium text-gray-700">Affiliate Program Status</label>
                             <div class="mt-1">
                                 <select name="affiliate_program_active" id="affiliate_program_active" class="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md">
-                                    <option value="1" {{ $settings['affiliate_program_active'] ? 'selected' : '' }}>Active</option>
-                                    <option value="0" {{ !$settings['affiliate_program_active'] ? 'selected' : '' }}>Inactive</option>
+                                    <option value="1" {{ ($settings['affiliate_program_active'] ?? false) ? 'selected' : '' }}>Active</option>
+                                    <option value="0" {{ !($settings['affiliate_program_active'] ?? false) ? 'selected' : '' }}>Inactive</option>
                                 </select>
                             </div>
                             <p class="mt-2 text-sm text-gray-500">Enable or disable the entire affiliate program.</p>
@@ -176,9 +177,8 @@
                             <label for="leaderboard_calculation" class="block text-sm font-medium text-gray-700">Leaderboard Ranking By</label>
                             <div class="mt-1">
                                 <select name="leaderboard_calculation" id="leaderboard_calculation" class="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md">
-                                    <option value="referrals" {{ ($settings['leaderboard_calculation'] ?? '') === 'referrals' ? 'selected' : '' }}>Number of Referrals</option>
-                                    <option value="earnings" {{ ($settings['leaderboard_calculation'] ?? '') === 'earnings' ? 'selected' : '' }}>Total Earnings</option>
-                                </select>
+                                    <option value="1" {{ ($settings['affiliate_program_active'] ?? false) ? 'selected' : '' }}>Active</option>
+                                    <option value="0" {{ !($settings['affiliate_program_active'] ?? false) ? 'selected' : '' }}>Inactive</option>                                        </select>
                             </div>
                             <p class="mt-2 text-sm text-gray-500">How the leaderboard ranks are calculated.</p>
                         </div>
