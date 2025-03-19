@@ -25,24 +25,37 @@ class WaitlistController extends Controller
             'name' => 'nullable|string|max:255',
             'referral_code' => 'nullable|string|exists:affiliate_details,affiliate_code',
         ]);
-
+    
         try {
+            // Check for referral code in request, session, or cookie (in that order of priority)
+            $referralCode = $request->input('referral_code')
+                ?? session('referral_code')
+                ?? $request->cookie('referral_code');
+            
             // Create waitlist entry
             $waitlist = Waitlist::create([
                 'email' => $request->email,
                 'name' => $request->name,
-                'referral_code' => $request->referral_code,
+                'referral_code' => $referralCode,
                 'is_invited' => false,
             ]);
-
+    
             // Increment referral count if referred
-            if ($request->filled('referral_code')) {
-                $this->processReferral($request->referral_code);
+            if ($referralCode) {
+                $this->processReferral($referralCode);
+                
+                // Log referral for debugging
+                Log::info('Waitlist referral processed', [
+                    'email' => $request->email,
+                    'referral_code' => $referralCode,
+                    'source' => $referralCode == $request->input('referral_code') ? 'form' : 
+                               (session()->has('referral_code') ? 'session' : 'cookie')
+                ]);
             }
-
+    
             // Send confirmation email
             Mail::to($request->email)->send(new WaitlistConfirmation($waitlist));
-
+    
             return redirect()->back()->with('success', 'You have been added to our waitlist! Check your email for confirmation.');
         } catch (\Exception $e) {
             Log::error('Waitlist submission error: ' . $e->getMessage());

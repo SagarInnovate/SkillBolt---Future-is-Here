@@ -70,4 +70,14 @@ class Referral extends Model
         
         // Create commission record (will be implemented in a service class)
     }
+
+    public function getStatusDescriptionAttribute(): string
+{
+    return match($this->status) {
+        'pending' => 'Registration Completed',
+        'successful' => 'Made First Purchase',
+        'failed' => 'Failed',
+        default => ucfirst($this->status)
+    };
+}
 }

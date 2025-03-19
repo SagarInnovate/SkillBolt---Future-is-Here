@@ -12,24 +12,33 @@ use App\Http\Controllers\AffiliateController;
 use App\Http\Controllers\Admin\AdminAffiliateController;
 use App\Services\AffiliateService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cookie;
+
 
 
 
 
 
 // Static pages
-Route::view('/', 'landing')->name('home');
+Route::get('/', function (Request $request) {
+    return view('landing');
+})->name('home');
+
 Route::post('/waitlist', [WaitlistController::class, 'store'])->name('waitlist.store');
 Route::view('/terms', 'pages.terms')->name('terms');
 Route::view('/privacy', 'pages.privacy')->name('privacy');
 
 // Tracking route - not protected to allow click tracking
+
 Route::get('/track/ref', function (Request $request) {
     if ($request->has('code')) {
         $referralCode = $request->code;
         
         // Store referral code in session for later use during registration
         session(['referral_code' => $referralCode]);
+        
+        // Also store in a longer-lived cookie (30 days)
+        Cookie::queue('referral_code', $referralCode, 43200); // 30 days in minutes
         
         // Track the click using the service
         app(AffiliateService::class)->trackReferralClick($request, $referralCode);

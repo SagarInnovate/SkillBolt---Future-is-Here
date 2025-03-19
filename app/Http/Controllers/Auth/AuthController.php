@@ -37,76 +37,42 @@ class AuthController extends Controller
         return view('auth.register');
     }
 
-    /**
-     * Handle registration request
-     */
-    public function register(Request $request): \Illuminate\Http\RedirectResponse
-    {
-        $userData = [
-            $request->name ?? '',
-            $request->email ?? '',
-        ];
-        
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:'.User::class],
-            'password' => ['required', 'confirmed', new StrongPassword($userData)],
-            'user_role' => ['required', 'in:student,company'],
-            'terms' => ['required', 'accepted'],
-        ]);
-        
-        // Use a database transaction to ensure data integrity
-        try {
-            return DB::transaction(function () use ($request, $validated) {
-                // Create the user
-                $user = User::create([
-                    'name' => $validated['name'],
-                    'email' => $validated['email'],
-                    'password' => $validated['password'], // Laravel 12 automatically hashes with 'password' => 'hashed' cast
-                    'account_status' => 'active',
-                ]);
-                
-                // Assign role
-                $role = Role::where('name', $validated['user_role'])->firstOrFail();
-                $user->roles()->attach($role->id, ['assigned_at' => now()]);
-                
-                // Create profile based on role
-                if ($validated['user_role'] === 'student') {
-                    StudentProfile::create(['user_id' => $user->id]);
-                    
-                    // If user came through referral, track it
-                    if ($request->filled('referral_code')) {
-                        $this->processReferral($user, $request->referral_code);
-                    }
-                    
-                    // If user should be a seller or affiliate
-                    if ($request->has('is_seller') && $request->is_seller == '1') {
-                        $user->permissions()->attach(
-                            \App\Models\Permission::where('name', 'can_sell')->firstOrFail()->id,
-                            ['status' => 'active', 'granted_at' => now()]
-                        );
-                    }
-                    
-                    if ($request->has('is_affiliate') && $request->is_affiliate == '1') {
-                        $user->permissions()->attach(
-                            \App\Models\Permission::where('name', 'can_affiliate')->firstOrFail()->id,
-                            ['status' => 'active', 'granted_at' => now()]
-                        );
-                        
-                        // Create affiliate details
-                        AffiliateDetail::create([
-                            'user_id' => $user->id,
-                            'affiliate_code' => $this->generateAffiliateCode($user),
-                            'total_referrals' => 0
-                        ]);
-                    }
-                } elseif ($validated['user_role'] === 'company') {
-                    CompanyProfile::create([
-                        'user_id' => $user->id,
-                        'company_name' => $validated['name'], // Default to user name, can be updated later
-                        'verification_status' => 'pending'
-                    ]);
-                }
+/**
+ * Handle registration request
+ */
+public function register(Request $request): \Illuminate\Http\RedirectResponse
+{
+    $userData = [
+        $request->name ?? '',
+        $request->email ?? '',
+    ];
+    
+    $validated = $request->validate([
+        'name' => ['required', 'string', 'max:255'],
+        'email' => ['required', 'string', 'email', 'max:255', 'unique:'.User::class],
+        'password' => ['required', 'confirmed', new StrongPassword($userData)],
+        'user_role' => ['required', 'in:student,company'],
+        'terms' => ['required', 'accepted'],
+    ]);
+    
+    // Use a database transaction to ensure data integrity
+    try {
+        return DB::transaction(function () use ($request, $validated) {
+            // Create the user
+            $user = User::create([
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'password' => $validated['password'], // Laravel 12 automatically hashes with 'password' => 'hashed' cast
+                'account_status' => 'active',
+            ]);
+            
+            // Assign role
+            $role = Role::where('name', $validated['user_role'])->firstOrFail();
+            $user->roles()->attach($role->id, ['assigned_at' => now()]);
+            
+            // Create profile based on role
+            if ($validated['user_role'] === 'student') {
+                StudentProfile::create(['user_id' => $user->id]);
                 
                 // Check if user was on waitlist and mark as converted
                 $waitlistEntry = Waitlist::where('email', $user->email)->first();
@@ -115,37 +81,81 @@ class AuthController extends Controller
                         'is_invited' => true,
                         'converted_user_id' => $user->id
                     ]);
+                    
+                    // If waitlisted student had a referral code, store it in session for the observer to handle
+                    if ($waitlistEntry->referral_code) {
+                        session(['referral_code' => $waitlistEntry->referral_code]);
+                    }
+                } 
+                // Get referral code from the request or session if it exists
+                elseif ($request->filled('referral_code') || session()->has('referral_code')) {
+                    // Just store in session - let the UserObserver handle it
+                    $referralCode = $request->input('referral_code') ?? session('referral_code');
+                    session(['referral_code' => $referralCode]);
                 }
                 
-                // Generate verification token and send email using new signed URL approach
-                $verificationUrl = URL::temporarySignedRoute(
-                    'verification.verify',
-                    now()->addMinutes(10),
-                    [
-                        'id' => $user->id,
-                        'hash' => sha1($user->email)
-                    ]
-                );
+                // If user should be a seller or affiliate
+                if ($request->has('is_seller') && $request->is_seller == '1') {
+                    $user->permissions()->attach(
+                        \App\Models\Permission::where('name', 'can_sell')->firstOrFail()->id,
+                        ['status' => 'active', 'granted_at' => now()]
+                    );
+                }
                 
-                // Send verification email with the signed URL
-                Mail::to($user->email)->send(new VerifyEmail($user, $verificationUrl));
-                
-                // Log the user in
-                Auth::login($user);
-                
-                return redirect()->route('verification.notice');
-            });
-        } catch (\Throwable $e) {
-            // Log the error
-            Log::error('Registration failed: ' . $e->getMessage());
+                if ($request->has('is_affiliate') && $request->is_affiliate == '1') {
+                    $user->permissions()->attach(
+                        \App\Models\Permission::where('name', 'can_affiliate')->firstOrFail()->id,
+                        ['status' => 'active', 'granted_at' => now()]
+                    );
+                    
+                    // Create affiliate details
+                    AffiliateDetail::create([
+                        'user_id' => $user->id,
+                        'affiliate_code' => $this->generateAffiliateCode($user),
+                        'total_referrals' => 0,
+                        'tier_level' => 1,
+                        'total_earnings' => 0,
+                        'available_balance' => 0,
+                        'successful_referrals' => 0,
+                        'status' => 'active'
+                    ]);
+                }
+            } elseif ($validated['user_role'] === 'company') {
+                CompanyProfile::create([
+                    'user_id' => $user->id,
+                    'company_name' => $validated['name'], // Default to user name, can be updated later
+                    'verification_status' => 'pending'
+                ]);
+            }
             
-            // Return to registration page with error
-            return back()
-                ->withInput($request->except('password'))
-                ->withErrors(['email' => 'Registration failed. Please try again.']);
-        }
+            // Generate verification token and send email using new signed URL approach
+            $verificationUrl = URL::temporarySignedRoute(
+                'verification.verify',
+                now()->addMinutes(10),
+                [
+                    'id' => $user->id,
+                    'hash' => sha1($user->email)
+                ]
+            );
+            
+            // Send verification email with the signed URL
+            Mail::to($user->email)->send(new VerifyEmail($user, $verificationUrl));
+            
+            // Log the user in
+            Auth::login($user);
+            
+            return redirect()->route('verification.notice');
+        });
+    } catch (\Throwable $e) {
+        // Log the error
+        Log::error('Registration failed: ' . $e->getMessage());
+        
+        // Return to registration page with error
+        return back()
+            ->withInput($request->except('password'))
+            ->withErrors(['email' => 'Registration failed. Please try again.']);
     }
-
+}
     /**
      * Show login form
      */

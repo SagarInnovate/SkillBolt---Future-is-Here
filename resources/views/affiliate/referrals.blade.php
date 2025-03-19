@@ -21,7 +21,6 @@
                     <span class="block sm:inline">{{ session('success') }}</span>
                 </div>
                 @endif
-
                 <!-- Stats Overview -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                     <div class="bg-indigo-50 rounded-lg shadow-sm p-4">
@@ -65,6 +64,117 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Add this to your stats grid in resources/views/affiliate/referrals.blade.php -->
+                    <div class="bg-purple-50 rounded-lg shadow-sm p-4">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="text-sm font-medium text-purple-500">Waitlisted Referrals</p>
+                                <p class="mt-2 text-3xl font-bold text-purple-800">{{ $waitlistedReferrals }}</p>
+                            </div>
+                            <div class="rounded-full bg-purple-100 p-2">
+                                <svg class="w-6 h-6 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="mt-2 text-sm text-purple-600">
+                            <span>Pending waitlist signups</span>
+                        </div>
+                    </div>
+
+                    <!-- Add this to your stats grid in resources/views/affiliate/referrals.blade.php -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <!-- Your existing stats boxes -->
+    
+    <!-- Total Clicks Box -->
+    <div class="bg-blue-50 rounded-lg shadow-sm p-4">
+        <div class="flex justify-between items-start">
+            <div>
+                <p class="text-sm font-medium text-blue-500">Total Link Clicks</p>
+                <p class="mt-2 text-3xl font-bold text-blue-800">{{ $totalClicks }}</p>
+            </div>
+            <div class="rounded-full bg-blue-100 p-2">
+                <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
+                </svg>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Conversion Rate Box -->
+    <div class="bg-green-50 rounded-lg shadow-sm p-4">
+        <div class="flex justify-between items-start">
+            <div>
+                <p class="text-sm font-medium text-green-500">Conversion Rate</p>
+                <p class="mt-2 text-3xl font-bold text-green-800">{{ number_format($conversionRate, 1) }}%</p>
+            </div>
+            <div class="rounded-full bg-green-100 p-2">
+                <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+            </div>
+        </div>
+        <div class="mt-2 text-xs text-green-600">
+            <span>Click-to-signup conversion</span>
+        </div>
+    </div>
+</div>
+
+<!-- Add this after your referrals table for source breakdown -->
+<div class="mt-8 bg-white rounded-lg shadow-sm border border-gray-200">
+    <div class="p-4 border-b border-gray-200">
+        <h2 class="text-lg font-medium text-gray-900">Traffic Sources</h2>
+    </div>
+    <div class="p-4">
+        @if(count($clicksBySource) > 0)
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Source
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Clicks
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Percentage
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        @foreach($clicksBySource as $source)
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <div class="text-sm font-medium text-gray-900">
+                                        {{ $source->source ?? 'Direct' }}
+                                    </div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <div class="text-sm text-gray-900">{{ $source->total }}</div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <div class="text-sm text-gray-900">
+                                        {{ number_format(($source->total / $totalClicks) * 100, 1) }}%
+                                    </div>
+                                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                                        <div class="bg-indigo-600 h-2.5 rounded-full" style="width: {{ ($source->total / $totalClicks) * 100 }}%"></div>
+                                    </div>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @else
+            <div class="text-center py-4 text-gray-500">
+                No click data available yet.
+            </div>
+        @endif
+    </div>
+</div>
+
                 </div>
 
                 <!-- Filters -->
@@ -147,7 +257,7 @@
                                         <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
                                             {{ $referral->status === 'successful' ? 'bg-green-100 text-green-800' : 
                                                ($referral->status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800') }}">
-                                            {{ ucfirst($referral->status) }}
+                                            {{ $referral->status_description }}
                                         </span>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap">

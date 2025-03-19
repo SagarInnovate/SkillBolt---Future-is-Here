@@ -71,7 +71,10 @@ class AffiliateService
      */
     public function generateQrCode(AffiliateDetail $affiliateDetail): string
     {
-        $referralLink = url('/?ref=' . $affiliateDetail->affiliate_code);
+        $referralLink = url('/track/ref') . '?code=' . $affiliateDetail->affiliate_code
+            . '&utm_source=qrcode'
+            . '&utm_medium=image' 
+            . '&utm_campaign=user_' . $affiliateDetail->user_id;
         
         $filename = 'qrcodes/' . $affiliateDetail->affiliate_code . '.svg';
         
@@ -324,4 +327,26 @@ class AffiliateService
             }
         }
     }
+
+
+    /**
+ * Process a successful purchase by a referred user.
+ * This should be called after a user completes their first purchase.
+ *
+ * @param  \App\Models\User  $user
+ * @param  float  $purchaseAmount
+ * @return void
+ */
+public function processFirstPurchase(User $user, float $purchaseAmount = 0): void
+{
+    // Find any pending referrals for this user
+    $referral = Referral::where('referred_user_id', $user->id)
+        ->where('status', 'pending')
+        ->first();
+    
+    if ($referral) {
+        // Convert the referral to successful
+        $this->convertReferral($referral);
+    }
+}
 }

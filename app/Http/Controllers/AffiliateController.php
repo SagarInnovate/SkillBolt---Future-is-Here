@@ -8,10 +8,15 @@ use App\Models\Referral;
 use App\Models\Commission;
 use App\Models\Payout;
 use App\Models\AffiliateSetting;
+use App\Models\Transaction;
 use App\Services\AffiliateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
+use App\Models\ReferralClick;
+use App\Models\Waitlist;
+
 
 class AffiliateController extends Controller
 {
@@ -20,6 +25,10 @@ class AffiliateController extends Controller
     public function __construct(AffiliateService $affiliateService)
     {
         $this->affiliateService = $affiliateService;
+        
+        // // Apply middleware to ensure user can access affiliate features
+        // $this->middleware('auth');
+        // $this->middleware('verified');
     }
     
     /**
@@ -28,6 +37,12 @@ class AffiliateController extends Controller
     public function dashboard()
     {
         $user = Auth::user();
+        
+        // Check if user has affiliate permission and affiliate details
+        if (!$user->canAffiliate() || !$user->affiliateDetails) {
+            return redirect()->route('affiliate.join')
+                ->with('info', 'You need to join the affiliate program first.');
+        }
         
         // Create or get affiliate account
         $affiliateDetail = $this->affiliateService->createAffiliateAccount($user);
@@ -53,7 +68,12 @@ class AffiliateController extends Controller
         $availableBalance = $affiliateDetail->available_balance;
         
         // Get referral link and QR code
-        $referralLink = url('/?ref=' . $affiliateDetail->affiliate_code);
+       // Get referral link and QR code
+        $referralLink = url('/track/ref') . '?code=' . $affiliateDetail->affiliate_code
+        . '&utm_source=affiliate'
+        . '&utm_medium=referral' 
+        . '&utm_campaign=user_' . $user->id;
+
         $qrCodeUrl = $affiliateDetail->qr_code_path 
             ? Storage::url($affiliateDetail->qr_code_path) 
             : null;
@@ -72,7 +92,8 @@ class AffiliateController extends Controller
             ->get();
             
         // Get recent commissions
-        $recentCommissions = Commission::where('user_id', $user->id)
+        $recentCommissions = Commission::with('referral.referredUser')
+            ->where('user_id', $user->id)
             ->orderBy('created_at', 'desc')
             ->take(5)
             ->get();
@@ -104,6 +125,9 @@ class AffiliateController extends Controller
         // Get user achievements
         $achievements = $user->achievements;
         
+        // Get commission rate from settings
+        $commissionRate = AffiliateSetting::get('commission_rate', 300);
+        
         return view('affiliate.dashboard', compact(
             'affiliateDetail',
             'referrals',
@@ -126,23 +150,75 @@ class AffiliateController extends Controller
             'currentTierInfo',
             'nextTierInfo',
             'nextTierProgress',
-            'achievements'
+            'achievements',
+            'commissionRate'
         ));
     }
     
     /**
      * Display referrals list
      */
-    public function referrals()
+
+    public function referrals( Request $request)
     {
         $user = Auth::user();
         
-        $referrals = Referral::with('referredUser')
-            ->where('referrer_id', $user->id)
-            ->orderBy('created_at', 'desc')
-            ->paginate(15);
-            
-        return view('affiliate.referrals', compact('referrals'));
+        // Check if user has affiliate permission and affiliate details
+        if (!$user->canAffiliate() || !$user->affiliateDetails) {
+            return redirect()->route('affiliate.join')
+                ->with('info', 'You need to join the affiliate program first.');
+        }
+        
+  // Filter parameters
+  $status = $request->input('status');
+  $dateFrom = $request->input('date_from');
+  $dateTo = $request->input('date_to');
+  
+  // Base query with relationship
+  $query = Referral::with('referredUser', 'commission')
+      ->where('referrer_id', $user->id);
+  
+  // Apply filters if provided
+  if ($status) {
+      $query->where('status', $status);
+  }
+  
+  if ($dateFrom) {
+      $query->whereDate('created_at', '>=', $dateFrom);
+  }
+  
+  if ($dateTo) {
+      $query->whereDate('created_at', '<=', $dateTo);
+  }
+  
+  $referrals = $query->orderBy('created_at', 'desc')->paginate(15);
+ 
+        
+        // Get total clicks data
+        $totalClicks = ReferralClick::where('referral_code', $user->affiliateDetails->affiliate_code)
+            ->count();
+        
+        // Get conversion rate
+        $conversionRate = $user->affiliateDetails->getConversionRateAttribute();
+        
+        // Calculate waitlisted referrals directly from the database
+        $waitlistedReferrals = Waitlist::where('referral_code', $user->affiliateDetails->affiliate_code)
+            ->where('is_invited', false) // Not yet converted to user
+            ->count();
+        
+        // Calculate clicks from different sources (for a chart, perhaps)
+        $clicksBySource = ReferralClick::where('referral_code', $user->affiliateDetails->affiliate_code)
+            ->select('source', DB::raw('count(*) as total'))
+            ->groupBy('source')
+            ->get();
+                
+        return view('affiliate.referrals', compact(
+            'referrals', 
+            'totalClicks', 
+            'conversionRate',
+            'waitlistedReferrals',
+            'clicksBySource'
+        ));
     }
     
     /**
@@ -151,6 +227,12 @@ class AffiliateController extends Controller
     public function commissions()
     {
         $user = Auth::user();
+        
+        // Check if user has affiliate permission and affiliate details
+        if (!$user->canAffiliate() || !$user->affiliateDetails) {
+            return redirect()->route('affiliate.join')
+                ->with('info', 'You need to join the affiliate program first.');
+        }
         
         $commissions = Commission::with('referral.referredUser')
             ->where('user_id', $user->id)
@@ -165,8 +247,16 @@ class AffiliateController extends Controller
      */
     public function leaderboard()
     {
+        $user = Auth::user();
+        
+        // Check if user has affiliate permission and affiliate details
+        if (!$user->canAffiliate() || !$user->affiliateDetails) {
+            return redirect()->route('affiliate.join')
+                ->with('info', 'You need to join the affiliate program first.');
+        }
+        
         $leaderboard = $this->affiliateService->getLeaderboard(50);
-        $userRank = $this->affiliateService->getUserRank(Auth::user());
+        $userRank = $this->affiliateService->getUserRank($user);
         
         return view('affiliate.leaderboard', compact('leaderboard', 'userRank'));
     }
@@ -177,6 +267,12 @@ class AffiliateController extends Controller
     public function payouts()
     {
         $user = Auth::user();
+        
+        // Check if user has affiliate permission and affiliate details
+        if (!$user->canAffiliate() || !$user->affiliateDetails) {
+            return redirect()->route('affiliate.join')
+                ->with('info', 'You need to join the affiliate program first.');
+        }
         
         $payouts = Payout::where('user_id', $user->id)
             ->orderBy('created_at', 'desc')
@@ -199,6 +295,12 @@ class AffiliateController extends Controller
     public function requestPayout(Request $request)
     {
         $user = Auth::user();
+        
+        // Check if user has affiliate permission and affiliate details
+        if (!$user->canAffiliate() || !$user->affiliateDetails) {
+            return redirect()->route('affiliate.join')
+                ->with('info', 'You need to join the affiliate program first.');
+        }
         
         // Validate request
         $request->validate([
@@ -237,6 +339,19 @@ class AffiliateController extends Controller
             ->whereIn('status', ['pending', 'approved'])
             ->update(['payout_id' => $payout->id]);
             
+        // Create transaction record
+        Transaction::createTransaction(
+            $user->id,
+            'payout_request',
+            $availableBalance,
+            'debit',
+            'Payout request #' . $payout->id,
+            $payout,
+            null,
+            'INR',
+            'pending'
+        );
+            
         return redirect()->route('affiliate.payouts')
             ->with('success', 'Payout request submitted successfully!');
     }
@@ -247,6 +362,12 @@ class AffiliateController extends Controller
     public function generateQrCode()
     {
         $user = Auth::user();
+        
+        // Check if user has affiliate permission and affiliate details
+        if (!$user->canAffiliate() || !$user->affiliateDetails) {
+            return response()->json(['error' => 'Not authorized'], 403);
+        }
+        
         $affiliateDetail = $user->affiliateDetails;
         
         if (!$affiliateDetail) {
@@ -263,45 +384,48 @@ class AffiliateController extends Controller
         ]);
     }
 
+    /**
+     * Show the form to join the affiliate program
+     */
     public function showJoinForm()
-{
-    // Check if user already has an affiliate account
-    if (auth()->user()->canAffiliate() && auth()->user()->affiliateDetails) {
-        return redirect()->route('affiliate.dashboard')
-            ->with('info', 'You are already an affiliate.');
+    {
+        // Check if user already has an affiliate account
+        if (auth()->user()->canAffiliate() && auth()->user()->affiliateDetails) {
+            return redirect()->route('affiliate.dashboard')
+                ->with('info', 'You are already an affiliate.');
+        }
+        
+        // Get the commission rate from settings
+        $commissionRate = AffiliateSetting::get('commission_rate', 300);
+        
+        // Get tier requirements
+        $tierRequirements = AffiliateSetting::get('tier_requirements', []);
+        
+        return view('affiliate.join', compact('commissionRate', 'tierRequirements'));
     }
-    
-    // Get the commission rate from settings
-    $commissionRate = AffiliateSetting::get('commission_rate', 300);
-    
-    // Get tier requirements
-    $tierRequirements = AffiliateSetting::get('tier_requirements', []);
-    
-    return view('affiliate.join', compact('commissionRate', 'tierRequirements'));
-}
 
-/**
- * Process the join affiliate program request
- */
-public function processJoin(Request $request)
-{
-    // Check if user already has an affiliate account
-    if (auth()->user()->canAffiliate() && auth()->user()->affiliateDetails) {
+    /**
+     * Process the join affiliate program request
+     */
+    public function processJoin(Request $request)
+    {
+        // Check if user already has an affiliate account
+        if (auth()->user()->canAffiliate() && auth()->user()->affiliateDetails) {
+            return redirect()->route('affiliate.dashboard')
+                ->with('info', 'You are already an affiliate.');
+        }
+        
+        // Add the affiliate permission to the user
+        auth()->user()->permissions()->attach(
+            \App\Models\Permission::where('name', 'can_affiliate')->first()->id,
+            ['status' => 'active', 'granted_at' => now()]
+        );
+        
+        // Create affiliate account
+        $affiliateDetail = $this->affiliateService->createAffiliateAccount(auth()->user());
+        
+        // Redirect to the affiliate dashboard
         return redirect()->route('affiliate.dashboard')
-            ->with('info', 'You are already an affiliate.');
+            ->with('success', 'You have successfully joined the affiliate program!');
     }
-    
-    // Add the affiliate permission to the user
-    auth()->user()->permissions()->attach(
-        \App\Models\Permission::where('name', 'can_affiliate')->first()->id,
-        ['status' => 'active', 'granted_at' => now()]
-    );
-    
-    // Create affiliate account
-    $affiliateDetail = $this->affiliateService->createAffiliateAccount(auth()->user());
-    
-    // Redirect to the affiliate dashboard
-    return redirect()->route('affiliate.dashboard')
-        ->with('success', 'You have successfully joined the affiliate program!');
-}
 }
