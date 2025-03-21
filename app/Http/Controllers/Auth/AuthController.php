@@ -292,6 +292,11 @@ public function register(Request $request): \Illuminate\Http\RedirectResponse
     
         $user = User::where('email', $request->email)->first();
         
+            // 🚨 Check if user is suspended
+        if ($user->account_status == 'suspended') {
+            return redirect()->route('account.suspended');
+        }
+
         // Generate OTP
         $otp = $this->generateOtp();
         

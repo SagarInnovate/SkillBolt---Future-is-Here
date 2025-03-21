@@ -5,6 +5,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\AdminMiddleware;
 use Illuminate\Console\Scheduling\Schedule; // Change this line
+use App\Http\Middleware\CheckSuspended; 
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -25,6 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Register route middleware aliases
         $middleware->alias([
             'admin' => AdminMiddleware::class,
+            'check.suspended' => CheckSuspended::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

@@ -20,9 +20,8 @@ use Illuminate\Support\Facades\Cookie;
 
 
 // Static pages
-Route::get('/', function (Request $request) {
-    return view('landing');
-})->name('home');
+Route::get('/', function (Request $request) {   return view('landing'); })->name('home');
+Route::get('/account-suspended', function () {  return view('auth.account-suspended');})->name('account.suspended');
 
 Route::post('/waitlist', [WaitlistController::class, 'store'])->name('waitlist.store');
 Route::view('/terms', 'pages.terms')->name('terms');
@@ -47,10 +46,6 @@ Route::get('/track/ref', function (Request $request) {
     // Redirect to homepage
     return redirect('/');
 })->name('track.referral');
-
-
-
-
 
 
 //user routes 
@@ -81,24 +76,18 @@ Route::middleware('guest')->group(function () {
 
 // Protected routes (require authentication)
 Route::middleware('auth')->group(function () {
-    // Logout
+
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
-    
-    // Email verification
     Route::get('/email/verify', [EmailVerificationController::class, 'notice'])->name('verification.notice');
     Route::post('/email/verification-notification', [EmailVerificationController::class, 'resend'])->middleware(['throttle:6,1'])->name('verification.resend');
         
-    // Protected routes that also require email verification
-    Route::middleware('verified')->group(function () {
-        // Dashboard (placeholder for now)
+    Route::middleware(['verified','check.suspended'])->group(function () {
         Route::view('/dashboard', 'dashboard')->name('dashboard');
-        
-        // Affiliate and referral link management
         Route::get('/referral-link', [WaitlistController::class, 'getReferralLink'])->name('referral.link');
     });
 });
 
-Route::middleware(['auth', 'verified'])->prefix('affiliate')->name('affiliate.')->group(function () {
+Route::middleware(['auth', 'verified', 'check.suspended'])->prefix('affiliate')->name('affiliate.')->group(function () {
     Route::get('/dashboard', [AffiliateController::class, 'dashboard'])->name('dashboard');
     Route::get('/referrals', [AffiliateController::class, 'referrals'])->name('referrals');
     Route::get('/commissions', [AffiliateController::class, 'commissions'])->name('commissions');

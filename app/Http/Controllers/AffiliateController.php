@@ -425,6 +425,13 @@ class AffiliateController extends Controller
      */
     public function processJoin(Request $request)
     {
+        // Check if the affiliate program is active
+        $isAffiliateActive = \App\Models\AffiliateSetting::get('affiliate_program_active', true);
+        
+        if (!$isAffiliateActive) {
+            return redirect()->back()->with('error', 'Affiliate program is currently inactive. You cannot join at this time.');
+        }
+    
         // Check if user already has an affiliate account
         if (auth()->user()->canAffiliate() && auth()->user()->affiliateDetails) {
             return redirect()->route('affiliate.dashboard')
@@ -440,6 +447,7 @@ class AffiliateController extends Controller
         // Create affiliate account
         $affiliateDetail = $this->affiliateService->createAffiliateAccount(auth()->user());
         
+        // Log the action
         AuditLog::create([
             'user_id' => auth()->id(),
             'action' => 'joined_affiliate_program',
@@ -449,9 +457,10 @@ class AffiliateController extends Controller
             'ip_address' => request()->ip(),
             'user_agent' => request()->userAgent()
         ]);
-
+    
         // Redirect to the affiliate dashboard
         return redirect()->route('affiliate.dashboard')
             ->with('success', 'You have successfully joined the affiliate program!');
     }
+    
 }

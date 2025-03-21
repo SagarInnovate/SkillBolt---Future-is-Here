@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
-            $table->enum('account_status', ['active', 'inactive', 'suspended'])->default('active');
+            $table->enum('account_status', ['active', 'frozen', 'suspended'])->default('active');
             $table->rememberToken();
             $table->timestamps();
             $table->softDeletes(); // Adds deleted_at timestamp column
